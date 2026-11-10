@@ -1,43 +1,74 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import os
 
-# 1. 페이지 설정 (브라우저 탭 제목 및 아이콘)
+# 1. 페이지 기본 설정 (브라우저 탭 제목 및 아이콘)
 st.set_page_config(
     page_title="주변 화장실",
     page_icon="🚽",
     layout="wide"
 )
 
-# 2. 메인 화면 제목 및 아이콘
+# 2. 메인 화면 타이틀
 st.title("🚽 주변 화장실 찾기")
 st.caption("경기도 남양주시 공중화장실 위치 기반 안내 서비스")
 
-# 3. 데이터 로드 함수 (캐싱 적용)
-DATA_PATH = "/content/drive/MyDrive/경기도 남양주시_공중화장실 현황_20260126.csv"
+# 3. 데이터 파일 로드 함수
+DEFAULT_FILE = "경기도 남양주시_공중화장실 현황_20260126.csv"
+
+st.sidebar.header("📁 데이터 설정")
+uploaded_file = st.sidebar.file_uploader(
+    "CSV 파일 업로드 (선택사항)", 
+    type=['csv'],
+    help="파일이 같은 폴더에 없거나 새로 업로드하려면 여기에 파일을 올려주세요."
+)
 
 @st.cache_data
-def load_data(file_path):
+def load_data_from_path(file_path):
+    if not os.path.exists(file_path):
+        return None
     try:
-        df = pd.read_csv(file_path)
-        # 위도/경도 숫자형 변환
-        df['위도'] = pd.to_numeric(df['위도'], errors='coerce')
-        df['경도'] = pd.to_numeric(df['경도'], errors='coerce')
-        # 좌표가 없는 데이터 제외
-        df = df.dropna(subset=['위도', '경도'])
+        try:
+            df = pd.read_csv(file_path, encoding='utf-8')
+        except UnicodeDecodeError:
+            df = pd.read_csv(file_path, encoding='cp949')
         return df
-    except Exception as e:
-        st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
-        return pd.DataFrame()
+    except Exception:
+        return None
 
-df = load_data(DATA_PATH)
+@st.cache_data
+def load_data_from_upload(file):
+    try:
+        try:
+            df = pd.read_csv(file, encoding='utf-8')
+        except UnicodeDecodeError:
+            file.seek(0)
+            df = pd.read_csv(file, encoding='cp949')
+        return df
+    except Exception:
+        return None
 
-if df.empty:
-    st.warning("데이터가 비어 있거나 파일을 불러올 수 없습니다. 경로를 확인해주세요.")
+# 데이터 불러오기 수행
+df = None
+if uploaded_file is not None:
+    df = load_data_from_upload(uploaded_file)
 else:
-    # 4. 사이드바 - 사용자 위치 입력 및 필터
+    df = load_data_from_path(DEFAULT_FILE)
+
+# 데이터 전처리 및 예외 처리
+if df is None or df.empty:
+    st.error(f"⚠️ 데이터 파일을 찾을 수 없습니다.")
+    st.info(f"현재 폴더에 `{DEFAULT_FILE}` 파일이 존재하지 않거나 경로가 잘못되었습니다. 왼쪽 사이드바의 **파일 업로드** 기능을 이용해 파일을 업로드해 주세요.")
+else:
+    # 필수 컬럼(위도, 경도) 결측치 정리
+    df['위도'] = pd.to_numeric(df['위도'], errors='coerce')
+    df['경도'] = pd.to_numeric(df['경도'], errors='coerce')
+    df = df.dropna(subset=['위도', '경도'])
+
+    # 4. 기준 위치 입력 및 필터
+    st.sidebar.markdown("---")
     st.sidebar.header("📍 기준 위치 입력")
-    st.sidebar.write("찾고자 하는 위치의 위도와 경도를 입력하세요.")
     
     # 남양주시청 근처 기본 좌표 설정
     default_lat = 37.6360
@@ -64,32 +95,23 @@ else:
     if filtered_df.empty:
         st.warning("조건에 맞는 화장실이 없습니다. 필터를 조정해 보세요.")
     else:
-        # 6. 거리 계산 (단순 유클리드 거리 기반 근사치 계산)
-        # 1도(degree) 당 거리는 위/경도가 다르지만 가까운 거리 내 순위 비교용으로는 충분합니다.
+        # 6. 거리 계산 및 상위 10개 추출
         filtered_df['거리차'] = ((filtered_df['위도'] - user_lat) ** 2 + (filtered_df['경도'] - user_lon) ** 2) ** 0.5
-        
-        # 가까운 순서대로 상위 10개 추출
         nearest_df = filtered_df.sort_values(by='거리차').head(10).copy()
-        
-        # 대략적인 거리(km) 안내용 컬럼 생성 (위도 1도 약 111km 기준 단순 산식)
         nearest_df['대략적거리(km)'] = (nearest_df['거리차'] * 111).round(2)
 
-        st.subheader(f"📍 입력하신 위치($\{user_lat:.4f}, \{user_lon:.4f}\$)에서 가장 가까운 화장실 TOP 10")
+        st.subheader(f"📍 입력하신 위치 ({user_lat:.4f}, {user_lon:.4f})에서 가장 가까운 화장실 TOP 10")
 
-        # 7. 표 출력용 컬럼 정리
         display_columns = [
             '화장실명', '소재지도로명주소', '대략적거리(km)', 
             '개방시간', '비상벨설치여부', '기저귀교환대유무', '전화번호', '관리기관명'
         ]
-        
-        # 존재하는 컬럼만 선택하여 표로 표시
         available_cols = [col for col in display_columns if col in nearest_df.columns]
         st.dataframe(nearest_df[available_cols].reset_index(drop=True), use_container_width=True)
 
-        # 8. Plotly 지도 시각화
+        # 7. Plotly 지도 시각화
         st.subheader("🗺️ 주변 화장실 지도 위치")
         
-        # 사용자가 입력한 위치도 시각화에 포함하기 위해 임시 행 추가
         user_point = pd.DataFrame({
             '화장실명': ['[기준 위치]'],
             '위도': [user_lat],
@@ -98,7 +120,6 @@ else:
             '소재지도로명주소': ['입력하신 기준 좌표']
         })
         
-        # 지도에 표시할 데이터 합치기
         map_df = pd.concat([nearest_df, user_point], ignore_index=True)
 
         fig = px.scatter_mapbox(
