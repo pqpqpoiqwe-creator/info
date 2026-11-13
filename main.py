@@ -1,4 +1,3 @@
-import os
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -16,7 +15,7 @@ st.set_page_config(
 st.title("🚻 주변 화장실")
 st.caption("현재 위치(위도, 경도)를 입력하면 가장 가까운 공중화장실 10곳의 위치와 개방 형태(상시/일시 개방)를 알려드립니다.")
 
-CSV_FILENAME = "경기도 남양주시_공중화장실 현황_20260126.csv"
+DATA_URL = "https://raw.githubusercontent.com/pqpqpoiqwe-creator/info/refs/heads/main/bathroom.csv"
 
 
 @st.cache_data
@@ -77,16 +76,17 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "CSV 파일 변경 (선택 사항)",
         type=["csv"],
-        help=f"기본적으로 같은 폴더의 '{CSV_FILENAME}' 파일을 불러옵니다.",
+        help="기본적으로 GitHub 저장소의 bathroom.csv 데이터를 불러옵니다.",
     )
 
 # 데이터 불러오기
-if uploaded_file is not None:
-    df = load_data(uploaded_file)
-elif os.path.exists(CSV_FILENAME):
-    df = load_data(CSV_FILENAME)
-else:
-    st.error(f"'{CSV_FILENAME}' 파일을 찾을 수 없습니다. 같은 폴더에 파일을 두거나 왼쪽 사이드바에서 CSV 파일을 업로드해 주세요.")
+try:
+    if uploaded_file is not None:
+        df = load_data(uploaded_file)
+    else:
+        df = load_data(DATA_URL)
+except Exception as e:
+    st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
     st.stop()
 
 # scikit-learn haversine_distances를 활용한 실제 지구 표면 거리(km) 계산
