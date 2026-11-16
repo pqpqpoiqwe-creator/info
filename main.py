@@ -113,32 +113,13 @@ col3.metric("일시적 개방 (주변 10곳 중)", f"{temp_open_cnt} 곳")
 
 st.divider()
 
-# 섹션 1: 주변 화장실 10개 위치 표 및 지도
+# 섹션 1: 주변 화장실 10개 위치 표
 st.subheader("📋 주변 화장실 10곳 위치 표")
 
 location_table = nearest_10[
     ["순위", "화장실명", "구분", "주소", "위도", "경도", "거리(km)", "전화번호"]
 ]
 st.dataframe(location_table, use_container_width=True, hide_index=True)
-
-# Streamlit 내장 st.map을 활용한 지도 시각화
-map_df = nearest_10[["화장실명", "위도", "경도", "거리(km)", "개방분류", "주소"]].copy()
-user_point = pd.DataFrame(
-    [
-        {
-            "화장실명": "📍 현재 입력 위치",
-            "위도": user_lat,
-            "경도": user_lon,
-            "거리(km)": 0.0,
-            "개방분류": "내 위치",
-            "주소": f"위도 {user_lat:.6f}, 경도 {user_lon:.6f}",
-        }
-    ]
-)
-plot_df = pd.concat([user_point, map_df], ignore_index=True)
-
-st.markdown("**🗺️ 주변 화장실 위치 지도**")
-st.map(plot_df, latitude="위도", longitude="경도", size=30, zoom=13)
 
 st.divider()
 
