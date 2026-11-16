@@ -271,4 +271,4 @@ cm_df = pd.DataFrame(
     columns=[f"예측: {lbl}" for lbl in labels],
 )
 st.dataframe(cm_df, use_container_width=True)
-st.caption("행(실제 개방 형태)과 열(모델 예측 개방 형태)을 교차 비교한 오분류표입니다.")[cite: 5]
+st.caption("행(실제 개방 형태)과 열(모델 예측 개방 형태)을 교차 비교한 오분류표입니다.")
