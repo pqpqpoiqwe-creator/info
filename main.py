@@ -1,6 +1,8 @@
 import pandas as pd
 import streamlit as st
 from sklearn.metrics.pairwise import haversine_distances
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import confusion_matrix, accuracy_score
 import numpy as np
 
 # 1. 브라우저 탭 제목 및 아이콘 설정
@@ -11,8 +13,8 @@ st.set_page_config(
 )
 
 # 2. 화면 맨 위 앱 제목 및 어울리는 아이콘 표시
-st.title("🚻 주변 화장실")
-st.caption("현재 위치(위도, 경도)를 입력하면 가장 가까운 공중화장실 10곳의 위치와 개방 형태(상시/일시 개방)를 알려드립니다.")
+st.title("🚻 주변 화장실 및 개방 형태 머신러닝 분류기")
+st.caption("현재 위치(위도, 경도)를 입력하면 가장 가까운 공중화장실 10곳을 찾고, 머신러닝(지도 학습)을 통해 개방 형태를 예측·분석합니다.")
 
 DATA_URL = "https://raw.githubusercontent.com/pqpqpoiqwe-creator/info/refs/heads/main/bathroom.csv"
 
@@ -119,7 +121,7 @@ location_table = nearest_10[
 ]
 st.dataframe(location_table, use_container_width=True, hide_index=True)
 
-# Streamlit 내장 st.map을 활용한 지도 시각화 (내 위치 + 주변 화장실 10곳)
+# Streamlit 내장 st.map을 활용한 지도 시각화
 map_df = nearest_10[["화장실명", "위도", "경도", "거리(km)", "개방분류", "주소"]].copy()
 user_point = pd.DataFrame(
     [
@@ -140,48 +142,74 @@ st.map(plot_df, latitude="위도", longitude="경도", size=30, zoom=13)
 
 st.divider()
 
-# 섹션 2: 분류를 사용한 항상 개방 vs 일시적 개방 표
-st.subheader("🕒 개방 형태 분류 표 (항상 개방 vs 일시적 개방)")
+# 섹션 2: 머신러닝(지도 학습) 분류 모델을 활용한 개방 형태 예측 및 오분류표(Confusion Matrix)
+st.subheader("🤖 지도 학습(Classification) 기반 개방 형태 예측 및 오분류표")
+st.caption("화장실의 시설 특성(대변기수, 소변기수 등)을 바탕으로 로지스틱 회귀 모델을 학습시켜 항상 개방 여부를 예측하고 성능을 평가합니다.")
 
-open_filter = st.radio(
-    "개방 분류 필터",
-    options=["전체 (10곳)", "항상 개방 (상시)", "일시적 개방 (정시/불규칙)"],
-    horizontal=True,
-)
+# 모델 학습용 특성(X)과 타겟(y) 준비 (전체 데이터 기준 학습)
+feature_cols = [
+    "남성용대변기수", "남성용소변기수", "남성용장애인용대변기수", 
+    "여성용대변기수", "여성용장애인용대변기수"
+]
 
-classification_table = nearest_10[
-    ["순위", "화장실명", "개방분류", "개방시간", "개방시간상세", "관리기관명", "거리(km)"]
-].rename(
-    columns={
-        "개방분류": "개방 분류 (항상/일시)",
-        "개방시간": "원본 개방구분",
-        "개방시간상세": "상세 개방시간",
-    }
-)
+# 결측치 처리 및 feature 추출
+train_df = df.dropna(subset=feature_cols + ["개방분류"]).copy()
+X_train = train_df[feature_cols]
+y_train = train_df["개방분류"]
 
-if open_filter != "전체 (10곳)":
-    classification_table = classification_table[
-        classification_table["개방 분류 (항상/일시)"] == open_filter
-    ]
+# 지도 학습 모델(Logistic Regression) 학습
+model = LogisticRegression(max_iter=1000, random_state=42)
+model.fit(X_train, y_train)
 
-st.dataframe(classification_table, use_container_width=True, hide_index=True)
+# 가장 가까운 10개 화장실에 대해 모델 예측 수행
+X_nearest = nearest_10[feature_cols].fillna(0)
+nearest_10["예측개방분류"] = model.predict(X_nearest)
 
-# 분류별 요약 집계표
-summary_df = (
-    nearest_10.groupby("개방분류", as_index=False)
-    .agg(
-        화장실_수=("화장실명", "count"),
-        평균_거리_km=("거리(km)", lambda s: round(s.mean(), 3)),
-        화장실_목록=("화장실명", lambda s: ", ".join(s)),
+# 10개 화장실 기준 실제값 vs 예측값 오분류표(Confusion Matrix) 생성
+labels = ["항상 개방 (상시)", "일시적 개방 (정시/불규칙)"]
+cm = confusion_matrix(nearest_10["개방분류"], nearest_10["예측개방분류"], labels=labels)
+acc = accuracy_score(nearest_10["개방분류"], nearest_10["예측개방분류"])
+
+# 결과 출력 탭 구성
+tab1, tab2, tab3 = st.tabs(["📋 주변 10곳 예측 결과 표", "📊 오분류표 (Confusion Matrix)", "📈 분류 요약 집계"])
+
+with tab1:
+    st.markdown("**가장 가까운 화장실 10곳의 실제 개방 형태 vs 머신러닝 예측 결과**")
+    pred_table = nearest_10[
+        ["순위", "화장실명", "개방분류", "예측개방분류", "개방시간상세", "관리기관명", "거리(km)"]
+    ].rename(columns={
+        "개방분류": "실제 개방 형태",
+        "예측개방분류": "모델 예측 형태",
+        "개방시간상세": "상세 시간"
+    })
+    st.dataframe(pred_table, use_container_width=True, hide_index=True)
+
+with tab2:
+    st.markdown(f"**🔍 오분류표 (Confusion Matrix)** — 모델 정확도: `{acc * 100:.1f}%`")
+    cm_df = pd.DataFrame(
+        cm,
+        index=[f"실제: {l}" for l in labels],
+        columns=[f"예측: {l}" for l in labels]
     )
-    .rename(
-        columns={
-            "개방분류": "개방 분류",
-            "화장실_수": "개소 수",
-            "평균_거리_km": "평균 거리(km)",
-            "화장실_목록": "해당 화장실 목록",
-        }
+    st.dataframe(cm_df, use_container_width=True)
+    st.info("💡 오분류표는 머신러닝 모델이 화장실의 실제 개방 상태를 올바르게 맞추었는지 행(실제)과 열(예측) 기준으로 비교해 주는 표입니다.")
+
+with tab3:
+    summary_df = (
+        nearest_10.groupby("개방분류", as_index=False)
+        .agg(
+            화장실_수=("화장실명", "count"),
+            평균_거리_km=("거리(km)", lambda s: round(s.mean(), 3)),
+            화장실_목록=("화장실명", lambda s: ", ".join(s)),
+        )
+        .rename(
+            columns={
+                "개방분류": "개방 분류",
+                "화장실_수": "개소 수",
+                "평균_거리_km": "평균 거리(km)",
+                "화장실_목록": "해당 화장실 목록",
+            }
+        )
     )
-)
-st.markdown("**개방 분류별 요약**")
-st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    st.markdown("**개방 분류별 요약**")
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
