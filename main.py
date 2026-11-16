@@ -1,8 +1,7 @@
-import re
 from datetime import datetime, timezone, timedelta
+import re
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
@@ -137,7 +136,7 @@ def load_data(file_source) -> pd.DataFrame:
 # 현재 한국 표준시(KST) 기준 시각
 now_kst = datetime.now(KST)
 weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
-current_time_str = f"{now_kst.strftime('%Y-%m-%d')} ({weekday_names[now_kst.weekday()]}) {now_kst.strftime('%H:%M')} KST"
+current_time_str = f"{now_kst.strftime('%Y-%m-%d')} ({weekday_names[now_kst.weekday()]}요일) {now_kst.strftime('%H:%M')} KST"
 
 # 사이드바: 위도·경도 입력 및 기준 시각 표시
 with st.sidebar:
@@ -264,34 +263,12 @@ classification_table = nearest_10[
 )
 st.dataframe(classification_table, use_container_width=True, hide_index=True)
 
-# 2-2. 오분류표 및 시각화
-left_col, right_col = st.columns([1.1, 1])
-
-with left_col:
-    st.markdown(f"**2) 오분류표 (Confusion Matrix) — 정확도: `{acc * 100:.1f}%`**")
-    cm_df = pd.DataFrame(
-        cm,
-        index=[f"실제: {lbl}" for lbl in labels],
-        columns=[f"예측: {lbl}" for lbl in labels],
-    )
-    st.dataframe(cm_df, use_container_width=True)
-    st.caption("행(실제 개방 형태)과 열(모델 예측 개방 형태)을 교차 비교한 오분류표입니다.")
-
-with right_col:
-    st.markdown("**3) 주변 10곳 현재 개방 현황 요약**")
-    status_counts = (
-        nearest_10["현재개방여부"]
-        .value_counts()
-        .reset_index()
-    )
-    status_counts.columns = ["현재 개방 상태", "화장실 수"]
-    fig = px.bar(
-        status_counts,
-        x="현재 개방 상태",
-        y="화장실 수",
-        color="현재 개방 상태",
-        text="화장실 수",
-        height=260,
-    )
-    fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
+# 2-2. 오분류표 출력
+st.markdown(f"**2) 오분류표 (Confusion Matrix) — 정확도: `{acc * 100:.1f}%`**")
+cm_df = pd.DataFrame(
+    cm,
+    index=[f"실제: {lbl}" for lbl in labels],
+    columns=[f"예측: {lbl}" for lbl in labels],
+)
+st.dataframe(cm_df, use_container_width=True)
+st.caption("행(실제 개방 형태)과 열(모델 예측 개방 형태)을 교차 비교한 오분류표입니다.")[cite: 5]
