@@ -1,5 +1,4 @@
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 from sklearn.metrics.pairwise import haversine_distances
 import numpy as np
@@ -120,7 +119,7 @@ location_table = nearest_10[
 ]
 st.dataframe(location_table, use_container_width=True, hide_index=True)
 
-# Plotly 지도 시각화 (내 위치 + 주변 화장실 10곳)
+# Streamlit 내장 st.map을 활용한 지도 시각화 (내 위치 + 주변 화장실 10곳)
 map_df = nearest_10[["화장실명", "위도", "경도", "거리(km)", "개방분류", "주소"]].copy()
 user_point = pd.DataFrame(
     [
@@ -136,28 +135,8 @@ user_point = pd.DataFrame(
 )
 plot_df = pd.concat([user_point, map_df], ignore_index=True)
 
-fig = px.scatter_mapbox(
-    plot_df,
-    lat="위도",
-    lon="경도",
-    color="개방분류",
-    hover_name="화장실명",
-    hover_data={"주소": True, "거리(km)": True, "위도": ":.5f", "경도": ":.5f"},
-    zoom=13,
-    height=420,
-    color_discrete_map={
-        "내 위치": "#E63946",
-        "항상 개방 (상시)": "#2A9D8F",
-        "일시적 개방 (정시/불규칙)": "#F4A261",
-    },
-)
-fig.update_layout(
-    mapbox_style="open-street-map",
-    margin={"r": 0, "t": 10, "l": 0, "b": 0},
-    legend_title_text="구분",
-)
-fig.update_traces(marker=dict(size=13))
-st.plotly_chart(fig, use_container_width=True)
+st.markdown("**🗺️ 주변 화장실 위치 지도**")
+st.map(plot_df, latitude="위도", longitude="경도", size=30, zoom=13)
 
 st.divider()
 
