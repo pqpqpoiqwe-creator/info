@@ -1,5 +1,5 @@
-import re
 from datetime import datetime, timezone, timedelta
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -16,7 +16,9 @@ st.set_page_config(
 
 # 2. 화면 맨 위 앱 제목 및 어울리는 아이콘 표시
 st.title("🚻 주변 화장실")
-st.caption("현재 위치(위도, 경도)를 입력하면 가장 가까운 공중화장실 10곳의 위치, 현재 개방 여부, 그리고 지도 학습 기반 개방 형태 분류 및 오분류표를 보여줍니다.")
+st.caption(
+    "현재 위치(위도, 경도)를 입력하면 가장 가까운 공중화장실 10곳의 위치, 현재 개방 여부, 그리고 지도 학습 기반 개방 형태 분류 및 오분류표를 보여줍니다."
+)
 
 DATA_URL = "https://raw.githubusercontent.com/pqpqpoiqwe-creator/info/refs/heads/main/bathroom.csv"
 KST = timezone(timedelta(hours=9))
@@ -168,4 +170,33 @@ with st.sidebar:
 # 데이터 불러오기
 try:
     df = load_data(DATA_URL)
-except Exception as e
+except Exception as e:
+    st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
+    st.stop()
+
+# scikit-learn haversine_distances를 활용한 실제 지구 표면 거리(km) 계산
+EARTH_RADIUS_KM = 6371.0
+user_rad = np.radians([[user_lat, user_lon]])
+toilets_rad = np.radians(df[["위도", "경도"]].to_numpy())
+distances_km = haversine_distances(user_rad, toilets_rad)[0] * EARTH_RADIUS_KM
+
+df["거리(km)"] = np.round(distances_km, 3)
+
+# 가장 가까운 화장실 10개 추출
+nearest_10 = df.sort_values("거리(km)", ascending=True).head(10).reset_index(drop=True)
+nearest_10.insert(0, "순위", range(1, len(nearest_10) + 1))
+
+# 현재 개방 여부 판별 컬럼 추가
+nearest_10["현재개방여부"] = nearest_10.apply(
+    lambda row: check_currently_open(row["개방시간"], row["개방시간상세"], now_kst),
+    axis=1,
+)
+
+# 상단 요약 지표
+open_now_cnt = int(nearest_10["현재개방여부"].str.startswith("🟢").sum())
+always_open_cnt = int((nearest_10["개방분류"] == "항상 개방").sum())
+temp_open_cnt = int((nearest_10["개방분류"] == "일시적 개방").sum())
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("가장 가까운 화장실", f"{nearest_10.loc[0, '거리(km)']:.3f} km", nearest_10.loc[0, "화장실명"])
+col2.metric("현재
