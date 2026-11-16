@@ -1,7 +1,8 @@
-from datetime import datetime, timezone, timedelta
 import re
+from datetime import datetime, timezone, timedelta
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
@@ -16,9 +17,7 @@ st.set_page_config(
 
 # 2. 화면 맨 위 앱 제목 및 어울리는 아이콘 표시
 st.title("🚻 주변 화장실")
-st.caption(
-    "현재 위치(위도, 경도)를 입력하면 가장 가까운 공중화장실 10곳의 위치, 현재 개방 여부, 그리고 지도 학습 기반 개방 형태 분류 및 오분류표를 보여줍니다."
-)
+st.caption("현재 위치(위도, 경도)를 입력하면 가장 가까운 공중화장실 10곳의 위치, 현재 개방 여부, 그리고 지도 학습 기반 개방 형태 분류 및 오분류표를 보여줍니다.")
 
 DATA_URL = "https://raw.githubusercontent.com/pqpqpoiqwe-creator/info/refs/heads/main/bathroom.csv"
 KST = timezone(timedelta(hours=9))
@@ -138,7 +137,7 @@ def load_data(file_source) -> pd.DataFrame:
 # 현재 한국 표준시(KST) 기준 시각
 now_kst = datetime.now(KST)
 weekday_names = ["월", "화", "수", "목", "금", "토", "일"]
-current_time_str = f"{now_kst.strftime('%Y-%m-%d')} ({weekday_names[now_kst.weekday()]}요일) {now_kst.strftime('%H:%M')} KST"
+current_time_str = f"{now_kst.strftime('%Y-%m-%d')} ({weekday_names[now_kst.weekday()]}) {now_kst.strftime('%H:%M')} KST"
 
 # 사이드바: 위도·경도 입력 및 기준 시각 표시
 with st.sidebar:
@@ -199,4 +198,100 @@ temp_open_cnt = int((nearest_10["개방분류"] == "일시적 개방").sum())
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("가장 가까운 화장실", f"{nearest_10.loc[0, '거리(km)']:.3f} km", nearest_10.loc[0, "화장실명"])
-col2.metric("현재
+col2.metric("현재 개방 중 (10곳 중)", f"{open_now_cnt} 곳", f"{now_kst.strftime('%H:%M')} 기준")
+col3.metric("항상 개방 (상시)", f"{always_open_cnt} 곳")
+col4.metric("일시적 개방 (정시/불규칙)", f"{temp_open_cnt} 곳")
+
+st.divider()
+
+# 섹션 1: 주변 화장실 10개 위치 표 (현재 개방 여부 포함)
+st.subheader("📋 주변 화장실 10곳 위치 및 현재 개방 여부 표")
+st.caption(f"기준 시각: {current_time_str}")
+
+location_table = nearest_10[
+    ["순위", "화장실명", "구분", "현재개방여부", "개방시간상세", "주소", "위도", "경도", "거리(km)", "전화번호"]
+].rename(
+    columns={
+        "현재개방여부": "현재 개방 여부",
+        "개방시간상세": "개방 시간 안내",
+    }
+)
+st.dataframe(location_table, use_container_width=True, hide_index=True)
+
+st.divider()
+
+# 섹션 2: 머신러닝(지도 학습) 분류 모델을 활용한 개방 형태 분류 표 및 오분류표
+st.subheader("🤖 지도 학습(분류) 기반 항상 개방 vs 일시적 개방 표 및 오분류표")
+st.caption("화장실 시설 특성(대변기수, 소변기수, 장애인용 변기수 등)으로 로지스틱 회귀(Logistic Regression) 지도 학습 모델을 학습시켜 항상 개방 여부를 분류합니다.")
+
+feature_cols = [
+    "남성용대변기수",
+    "남성용소변기수",
+    "남성용장애인용대변기수",
+    "여성용대변기수",
+    "여성용장애인용대변기수",
+]
+
+train_df = df.dropna(subset=feature_cols + ["개방분류"]).copy()
+X_train = train_df[feature_cols].fillna(0)
+y_train = train_df["개방분류"]
+
+# 지도 학습 분류 모델 학습
+clf = LogisticRegression(max_iter=1000, random_state=42)
+clf.fit(X_train, y_train)
+
+# 주변 10개 화장실 예측
+X_nearest = nearest_10[feature_cols].fillna(0)
+nearest_10["예측개방분류"] = clf.predict(X_nearest)
+
+# 오분류표(Confusion Matrix) 계산 (주변 10개 기준)
+labels = ["항상 개방", "일시적 개방"]
+cm = confusion_matrix(nearest_10["개방분류"], nearest_10["예측개방분류"], labels=labels)
+acc = accuracy_score(nearest_10["개방분류"], nearest_10["예측개방분류"])
+
+# 2-1. 분류 결과 표
+st.markdown("**1) 주변 10개 화장실 개방 형태 분류 표 (실제 vs 지도 학습 예측)**")
+classification_table = nearest_10[
+    ["순위", "화장실명", "개방분류", "예측개방분류", "현재개방여부", "개방시간", "개방시간상세", "거리(km)"]
+].rename(
+    columns={
+        "개방분류": "실제 개방 분류",
+        "예측개방분류": "모델 예측 분류",
+        "현재개방여부": "현재 개방 여부",
+        "개방시간": "원본 구분",
+        "개방시간상세": "상세 개방시간",
+    }
+)
+st.dataframe(classification_table, use_container_width=True, hide_index=True)
+
+# 2-2. 오분류표 및 시각화
+left_col, right_col = st.columns([1.1, 1])
+
+with left_col:
+    st.markdown(f"**2) 오분류표 (Confusion Matrix) — 정확도: `{acc * 100:.1f}%`**")
+    cm_df = pd.DataFrame(
+        cm,
+        index=[f"실제: {lbl}" for lbl in labels],
+        columns=[f"예측: {lbl}" for lbl in labels],
+    )
+    st.dataframe(cm_df, use_container_width=True)
+    st.caption("행(실제 개방 형태)과 열(모델 예측 개방 형태)을 교차 비교한 오분류표입니다.")
+
+with right_col:
+    st.markdown("**3) 주변 10곳 현재 개방 현황 요약**")
+    status_counts = (
+        nearest_10["현재개방여부"]
+        .value_counts()
+        .reset_index()
+    )
+    status_counts.columns = ["현재 개방 상태", "화장실 수"]
+    fig = px.bar(
+        status_counts,
+        x="현재 개방 상태",
+        y="화장실 수",
+        color="현재 개방 상태",
+        text="화장실 수",
+        height=260,
+    )
+    fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
