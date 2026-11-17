@@ -2,6 +2,7 @@ from datetime import datetime, timezone, timedelta
 import re
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
@@ -129,6 +130,8 @@ def load_data(file_source) -> pd.DataFrame:
         lambda x: "항상 개방" if str(x).strip() == "상시" else "일시적 개방"
     )
     df["개방시간상세"] = df["개방시간상세"].fillna("-").astype(str).str.strip()
+    df["화장실소유구분"] = df["화장실소유구분"].fillna("미상").astype(str).str.strip()
+    df["관리기관명"] = df["관리기관명"].fillna("미상").astype(str).str.strip()
 
     return df
 
@@ -190,7 +193,7 @@ nearest_10["현재개방여부"] = nearest_10.apply(
     axis=1,
 )
 
-# 상단 요약 지표
+# 상단 요약 지표 (질문 1: 현재 시각 기준 실시간 개방 여부 분포 요약 포함)
 open_now_cnt = int(nearest_10["현재개방여부"].str.startswith("🟢").sum())
 always_open_cnt = int((nearest_10["개방분류"] == "항상 개방").sum())
 temp_open_cnt = int((nearest_10["개방분류"] == "일시적 개방").sum())
@@ -203,7 +206,7 @@ col4.metric("일시적 개방 (정시/불규칙)", f"{temp_open_cnt} 곳")
 
 st.divider()
 
-# 섹션 1: 주변 화장실 10개 위치 표 (현재 개방 여부 포함)
+# 섹션 1: 주변 화장실 10개 위치 표 (질문 1 해결: 개별 화장실별 현재 개방 여부 및 시간 안내)
 st.subheader("📋 주변 화장실 10곳 위치 및 현재 개방 여부 표")
 st.caption(f"기준 시각: {current_time_str}")
 
@@ -272,3 +275,81 @@ cm_df = pd.DataFrame(
 )
 st.dataframe(cm_df, use_container_width=True)
 st.caption("행(실제 개방 형태)과 열(모델 예측 개방 형태)을 교차 비교한 오분류표입니다.")
+
+st.divider()
+
+# 섹션 3: 질문 2 해결 - 관리기관명 및 화장실 소유 구분별 개방 형태 비율과 운영 방식 분석
+st.subheader("🏛️ 관리기관명 및 화장실 소유 구분별 개방 형태 비율과 운영 방식 분석")
+st.caption("전체 공중화장실 데이터를 기준으로 소유 주체와 주요 관리기관에 따른 항상 개방 vs 일시적 개방 비율 및 운영 방식(상시·정시·불규칙) 차이를 비교합니다.")
+
+tab_owner, tab_agency = st.tabs(["🏢 화장실 소유 구분별 분석", "🗂️ 주요 관리기관명별 분석 (상위 10개 기관)"])
+
+with tab_owner:
+    owner_ct = pd.crosstab(df["화장실소유구분"], df["개방분류"])
+    for col in ["항상 개방", "일시적 개방"]:
+        if col not in owner_ct.columns:
+            owner_ct[col] = 0
+    owner_ct = owner_ct[["항상 개방", "일시적 개방"]]
+    owner_ct["전체 개소 수"] = owner_ct["항상 개방"] + owner_ct["일시적 개방"]
+    owner_ct["항상 개방 비율(%)"] = np.round(owner_ct["항상 개방"] / owner_ct["전체 개소 수"] * 100, 1)
+    owner_ct["일시적 개방 비율(%)"] = np.round(owner_ct["일시적 개방"] / owner_ct["전체 개소 수"] * 100, 1)
+    owner_ct = owner_ct.sort_values("전체 개소 수", ascending=False).reset_index()
+
+    st.markdown("**1) 화장실 소유 구분별 개방 형태 분포 및 비율 표**")
+    st.dataframe(owner_ct, use_container_width=True, hide_index=True)
+
+    owner_melt = owner_ct.melt(
+        id_vars=["화장실소유구분"],
+        value_vars=["항상 개방", "일시적 개방"],
+        var_name="개방 형태",
+        value_name="화장실 수",
+    )
+    fig_owner = px.bar(
+        owner_melt,
+        x="화장실소유구분",
+        y="화장실 수",
+        color="개방 형태",
+        barmode="stack",
+        text="화장실 수",
+        title="소유 구분별 항상 개방 vs 일시적 개방 비교",
+        color_discrete_map={"항상 개방": "#2A9D8F", "일시적 개방": "#F4A261"},
+        height=360,
+    )
+    fig_owner.update_layout(xaxis_title="화장실 소유 구분", yaxis_title="화장실 수(개소)")
+    st.plotly_chart(fig_owner, use_container_width=True)
+
+with tab_agency:
+    top_10_agencies = df["관리기관명"].value_counts().head(10).index
+    agency_df = df[df["관리기관명"].isin(top_10_agencies)].copy()
+
+    agency_ct = pd.crosstab(agency_df["관리기관명"], agency_df["개방시간"])
+    for col in ["상시", "정시", "불규칙"]:
+        if col not in agency_ct.columns:
+            agency_ct[col] = 0
+    agency_ct = agency_ct[["상시", "정시", "불규칙"]]
+    agency_ct["전체 개소 수"] = agency_ct["상시"] + agency_ct["정시"] + agency_ct["불규칙"]
+    agency_ct["항상 개방(상시) 비율(%)"] = np.round(agency_ct["상시"] / agency_ct["전체 개소 수"] * 100, 1)
+    agency_ct = agency_ct.sort_values("전체 개소 수", ascending=False).reset_index()
+
+    st.markdown("**1) 주요 관리기관(상위 10곳)별 운영 방식(상시·정시·불규칙) 및 상시 개방 비율 표**")
+    st.dataframe(agency_ct, use_container_width=True, hide_index=True)
+
+    agency_melt = agency_ct.melt(
+        id_vars=["관리기관명"],
+        value_vars=["상시", "정시", "불규칙"],
+        var_name="운영 방식",
+        value_name="화장실 수",
+    )
+    fig_agency = px.bar(
+        agency_melt,
+        x="관리기관명",
+        y="화장실 수",
+        color="운영 방식",
+        barmode="stack",
+        text="화장실 수",
+        title="주요 관리기관별 운영 방식(상시 vs 정시 vs 불규칙) 분포",
+        color_discrete_map={"상시": "#2A9D8F", "정시": "#457B9D", "불규칙": "#E76F51"},
+        height=380,
+    )
+    fig_agency.update_layout(xaxis_title="관리기관명", yaxis_title="화장실 수(개소)")
+    st.plotly_chart(fig_agency, use_container_width=True)
